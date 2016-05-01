@@ -51,10 +51,58 @@ bool valid(const std::string &file)
 	return false;
 }
 
+bool dir_exists(const char *path)
+{
+	DIR *dir = opendir(path);
+	if (dir)
+	{
+		closedir(dir);
+		return true;
+	}
+	else if (errno == ENOENT)
+	{
+		return false;
+	}
+	else
+	{
+		std::cerr << std::strerror(errno) << std::endl;
+		exit(errno);
+	}
+}
+
+void create_dir_tree(const char *base_path, const char *data_path)
+{
+	std::string ptemp = base_path;
+	std::vector<std::string> to_create = {"/images", "/out", "/images/original", "/images/upscaled"};
+	ptemp += "/";
+	ptemp += data_path;
+	if (mkdir(ptemp.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH))
+	{
+		if (errno != EEXIST)
+		{
+			std::cerr << std::strerror(errno) << std::endl;
+			exit(errno);
+		}
+	}
+	for (auto itr = to_create.begin(); itr != to_create.end(); itr++)
+	{
+		ptemp = base_path;
+		ptemp += "/";
+		ptemp += data_path;
+		ptemp += *itr;
+		if (mkdir(ptemp.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH))
+		{
+			if (errno != EEXIST)
+			{
+				std::cerr << std::strerror(errno) << std::endl;
+				exit(errno);
+			}
+		}
+	}
+}
+
 void make_work(std::vector<work_unit_t *> *work, DIR *dir, const char *base_path)
 {
-	//std::cout << base_path << std::endl;
-	//std::cout << dir << std::endl;
 	dirent *dp = NULL;
 	struct stat st;
 	std::vector<std::string> dirs;
@@ -63,73 +111,65 @@ void make_work(std::vector<work_unit_t *> *work, DIR *dir, const char *base_path
 	std::string dtemp;
 	std::string ftemp;
 	std::string ptemp;
+	std::string data_dir; 
+	std::string original_image_dir;
+	std::string upscaled_image_dir;
+	std::string output_dir;
+	DIR *dptemp;
 	while (dir)
 	{
-		//end up calling do_work with *NEW* dir ptr
 		dp = readdir(dir);
 		if (dp != NULL)
 		{
-			//std::cout << dp -> d_name << std::endl;
 			ptemp = base_path;
 			ptemp += "/";
 			ptemp += dp -> d_name;
 			if (lstat(ptemp.c_str(), &st) == 0)
 			{
-				//std::cout << "no error" << std::endl;
-				//std::cout << "pushing back " << dp -> d_name << std::endl;
 				if (S_ISDIR(st.st_mode))
 				{
-					dirs.push_back(std::string((const char*) dp -> d_name));
+					dirs.push_back(std::string(dp -> d_name));
 				}
 				else
 				{
-					files.push_back(std::string((const char*) dp -> d_name));
+					files.push_back(std::string(dp -> d_name));
 				}
 			}
 			else
 			{
-				//std::cout << lstat(dp -> d_name, &st) << std::endl;
 				std::cerr << std::strerror(errno) << std::endl;
+				closedir(dir);
 				exit(errno);
 			}
 		}
 		else
 		{
-			closedir(dir);
+			closedir(dir); //ensure that this gets called - errors from lstat or readdir may cause this to fail
 			break;
 		}
 	}
-	if (dp) { delete dp; }
+	//if (dp) { delete dp; }
 	for (auto fitr = files.begin(); fitr != files.end(); fitr++)
 	{
 		if (valid(*fitr))
 		{
-			//std::cout << *fitr << " is valid" << std::endl;
-			match_dir = false;
-			for (auto ditr = dirs.begin(); ditr != dirs.end(); ditr++)
+			create_dir_tree(base_path, fitr -> substr(0, fitr -> find_last_of(".")).c_str());
+			data_dir = base_path;
+			data_dir += "/";
+			data_dir += fitr -> substr(0, fitr -> find_last_of("."));
+			original_image_dir = data_dir;
+			original_image_dir += "/images/original";
+			upscaled_image_dir = data_dir;
+			upscaled_image_dir += "/images/upscaled";
+			output_dir = data_dir;
+			output_dir += "/out";
+			//check for existing extracted images
+			dptemp = opendir(original_image_dir.c_str());
+			while (dptemp)
 			{
-				//std::cout << *ditr << std::endl;
-				if (ditr -> size() < fitr -> size() && ditr -> compare(0, std::string::npos, fitr -> c_str(), ditr -> size()) == 0)
-				{
-					match_dir = true;
-					std::cout << *ditr << " matches " << *fitr << "!" << std::endl;
-					dtemp = *ditr;
-					ftemp = *fitr;
-					break;
-				}
+				dp = readdir(dptemp);
 			}
-			if (!match_dir)
-			{
-				ptemp = base_path;
-				ptemp += "/";
-				ptemp += fitr -> substr(0, fitr -> find_last_of("."));
-				//std::cout << ptemp << std::endl;
-				if (mkdir(ptemp.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH))
-				{
-					std::cerr << std::strerror(errno) << std::endl;
-					exit(errno);
-				}
-			}
+			
 		}
 	}
 	/* a miracle happens */
@@ -140,11 +180,11 @@ void make_work(std::vector<work_unit_t *> *work, DIR *dir, const char *base_path
 			ptemp = base_path;
 			ptemp += "/";
 			ptemp += *ditr;
-			DIR *newdir = opendir(ptemp.c_str());
-			make_work(work, newdir, ptemp.c_str());
-			
+			dptemp = opendir(ptemp.c_str());
+			make_work(work, dptemp, ptemp.c_str());
 		}
 	}
+	//if (dp) { delete dp; }
 }
 
 void do_work(std::vector<work_unit_t *> *work, std::mutex *vector_lock)
@@ -158,13 +198,18 @@ int main(int argc, char** argv)
 	std::mutex vector_lock;
 	size_t buf_size = 1024;
 	char* buf = new char[buf_size];
-	if (getcwd(buf, buf_size) == NULL)
+	if (argc > 1)
 	{
-		return -1;
+		strcpy(buf, argv[1]);
 	}
-	//std::cout << buf << std::endl;
+	else if (getcwd(buf, buf_size) == NULL)
+	{
+		std::cerr << std::strerror(errno) << std::endl;
+		return errno;
+	}
 	DIR *dir = opendir(buf);
 	make_work(&work, dir, buf);
+	do_work(&work, &vector_lock);
 	delete[] buf;
 	return 0;
 }
