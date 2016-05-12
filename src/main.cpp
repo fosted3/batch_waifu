@@ -20,12 +20,12 @@ typedef enum
 	render_video
 } work_t;
 
-/*typedef enum
+typedef enum
 {
-	not_started,
-	in_progress,
-	done
-} status_t;*/
+	STATUS_NOT_STARTED,
+	STATUS_IN_PROGRESS,
+	STATUS_DONE
+} status_t;
 
 typedef struct
 {
@@ -35,7 +35,7 @@ typedef struct
 	//std::mutex *work_lock;
 	std::queue<uint64_t> *deps;
 	work_t type;
-	int status;
+	status_t status;
 } work_unit_t;
 
 typedef struct
@@ -297,7 +297,7 @@ void make_work(std::vector<work_unit_t *> *work, DIR *dir, const char *base_path
 				//wtemp -> work_lock = new std::mutex;
 				wtemp -> deps = new std::queue<uint64_t>;
 				wtemp -> type = extract_image;
-				wtemp -> status = 0;
+				wtemp -> status = STATUS_NOT_STARTED;
 				work -> push_back(wtemp);
 			}
 			if (!upscale_img && !video)
@@ -310,7 +310,7 @@ void make_work(std::vector<work_unit_t *> *work, DIR *dir, const char *base_path
 				//wtemp -> work_lock = new std::mutex;
 				wtemp -> deps = new std::queue<uint64_t>;
 				wtemp -> type = upscale_image;
-				wtemp -> status = 0;
+				wtemp -> status = STATUS_NOT_STARTED;
 				if (!orig_img)
 				{
 					wtemp -> deps -> push(orig_img_id);
@@ -329,7 +329,7 @@ void make_work(std::vector<work_unit_t *> *work, DIR *dir, const char *base_path
 				//wtemp -> work_lock = new std::mutex;
 				wtemp -> deps = new std::queue<uint64_t>;
 				wtemp -> type = extract_audio;
-				wtemp -> status = 0;
+				wtemp -> status = STATUS_NOT_STARTED;
 				work -> push_back(wtemp);
 			}
 			if (!video)
@@ -343,7 +343,7 @@ void make_work(std::vector<work_unit_t *> *work, DIR *dir, const char *base_path
 				//wtemp -> work_lock = new std::mutex;
 				wtemp -> deps = new std::queue<uint64_t>;
 				wtemp -> type = render_video;
-				wtemp -> status = 0;
+				wtemp -> status = STATUS_NOT_STARTED;
 				if (!orig_img)
 				{
 					wtemp -> deps -> push(orig_img_id);
@@ -395,17 +395,17 @@ void *work_thread(void *data)
 		for (auto itr = thread_data -> work -> begin(); itr != thread_data -> work -> end(); itr++)
 		{
 			//(*itr) -> work_lock -> lock();
-			if ((*itr) -> status == 0 && (*itr) -> deps -> empty())
+			if ((*itr) -> status == STATUS_NOT_STARTED && (*itr) -> deps -> empty())
 			{
 				//std::cout << "ID " << (*itr) -> id << " has no deps. Starting." << std::endl;
 				unit = *itr;
 			}
-			else if ((*itr) -> status == 0 && !((*itr) -> deps -> empty()))
+			else if ((*itr) -> status == STATUS_NOT_STARTED && !((*itr) -> deps -> empty()))
 			{
 				do
 				{
 					//thread_data -> work -> at((*itr) -> deps -> front()) -> work_lock -> lock();
-					if (thread_data -> work -> at((*itr) -> deps -> front()) -> status == 2)
+					if (thread_data -> work -> at((*itr) -> deps -> front()) -> status == STATUS_DONE)
 					{
 						//thread_data -> work -> at((*itr) -> deps -> front()) -> work_lock -> unlock();
 						(*itr) -> deps -> pop();
@@ -432,7 +432,7 @@ void *work_thread(void *data)
 		if (unit)
 		{
 			//unit -> work_lock -> lock();
-			unit -> status = 1;
+			unit -> status = STATUS_IN_PROGRESS;
 			//unit -> work_lock -> unlock();
 		}
 		if (unit)
@@ -440,7 +440,7 @@ void *work_thread(void *data)
 			done = false;
 			execute_unit(unit);
 			//unit -> work_lock -> lock();
-			unit -> status = 2;
+			unit -> status = STATUS_DONE;
 			//unit -> work_lock -> unlock();
 		}
 		thread_data -> vector_lock -> unlock();
