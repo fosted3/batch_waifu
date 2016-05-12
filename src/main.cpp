@@ -125,7 +125,7 @@ void make_work(std::vector<work_unit_t *> *work, DIR *dir, const char *base_path
 	struct stat st;
 	std::vector<std::string> dirs;
 	std::vector<std::string> files;
-	bool match_dir;
+	//bool match_dir;
 	std::string dtemp;
 	std::string ftemp;
 	std::string ptemp;
@@ -365,7 +365,7 @@ void do_work(std::vector<work_unit_t *> *work, std::mutex *vector_lock)
 {
 	for (auto itr = work -> begin(); itr != work -> end(); itr++)
 	{
-		std::cout << (*itr) -> command;
+		std::cout << *((*itr) -> command);
 	}
 }
 
