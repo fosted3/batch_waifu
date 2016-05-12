@@ -365,7 +365,7 @@ void do_work(std::vector<work_unit_t *> *work, std::mutex *vector_lock)
 {
 	for (auto itr = work -> begin(); itr != work -> end(); itr++)
 	{
-		std::cout << *((*itr) -> command);
+		std::cout << *((*itr) -> command) << std::endl;
 	}
 }
 
