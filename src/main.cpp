@@ -278,9 +278,9 @@ void make_work(std::vector<work_unit_t *> *work, DIR *dir, const char *base_path
 				wtemp -> id = work -> size();
 				orig_img_id = wtemp -> id;
 				wtemp -> working_dir = new std::string(original_image_dir);
-				wtemp -> command = new std::string("ffmpeg -i ../../");
+				wtemp -> command = new std::string("ffmpeg -i \"../../");
 				*(wtemp -> command) += *fitr;
-				*(wtemp -> command) += " %05d.png";
+				*(wtemp -> command) += "\" %05d.png";
 				wtemp -> work_lock = new std::mutex;
 				wtemp -> deps = new std::queue<uint64_t>;
 				wtemp -> type = extract_image;
@@ -310,9 +310,9 @@ void make_work(std::vector<work_unit_t *> *work, DIR *dir, const char *base_path
 				wtemp -> id = work -> size();
 				audio_id = wtemp -> id;
 				wtemp -> working_dir = new std::string(data_dir);
-				wtemp -> command = new std::string("ffmpeg -i ../");
+				wtemp -> command = new std::string("ffmpeg -i \"../");
 				*(wtemp -> command) += *fitr;
-				*(wtemp -> command) += " -vn -acodec copy audio.ext";
+				*(wtemp -> command) += "\" -vn -acodec copy audio.ext";
 				wtemp -> work_lock = new std::mutex;
 				wtemp -> deps = new std::queue<uint64_t>;
 				wtemp -> type = extract_audio;
@@ -324,8 +324,9 @@ void make_work(std::vector<work_unit_t *> *work, DIR *dir, const char *base_path
 				wtemp = new work_unit_t;
 				wtemp -> id = work -> size();
 				wtemp -> working_dir = new std::string(output_dir);
-				wtemp -> command = new std::string("ffmpeg -framerate 30 -i ../images/upscaled/%05d.png -i ../audio.ext -c:v libx264 -c:a aac -strict experimental -b:a 192k -shortest -pix_fmt yuv420p");
+				wtemp -> command = new std::string("ffmpeg -framerate 30 -i ../images/upscaled/%05d.png -i ../audio.ext -c:v libx264 -c:a aac -strict experimental -b:a 192k -shortest -pix_fmt yuv420p \"");
 				*(wtemp -> command) += *fitr;
+				*(wtemp -> command) += "\"";
 				wtemp -> work_lock = new std::mutex;
 				wtemp -> deps = new std::queue<uint64_t>;
 				wtemp -> type = render_video;
