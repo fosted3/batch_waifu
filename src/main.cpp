@@ -20,16 +20,29 @@ typedef enum
 	render_video
 } work_t;
 
+/*typedef enum
+{
+	not_started,
+	in_progress,
+	done
+} status_t;*/
+
 typedef struct
 {
 	uint64_t id;
 	std::string *working_dir;
 	std::string *command;
-	std::mutex *work_lock;
+	//std::mutex *work_lock;
 	std::queue<uint64_t> *deps;
 	work_t type;
-	bool done;
+	int status;
 } work_unit_t;
+
+typedef struct
+{
+	std::vector<work_unit_t *> *work;
+	std::mutex *vector_lock;
+} thread_data_t;
 
 void create_thread(pthread_t *thread, const pthread_attr_t *attr, void *(*start_routine) (void *), void *arg)
 {
@@ -281,10 +294,10 @@ void make_work(std::vector<work_unit_t *> *work, DIR *dir, const char *base_path
 				wtemp -> command = new std::string("ffmpeg -i \"../../");
 				*(wtemp -> command) += *fitr;
 				*(wtemp -> command) += "\" %05d.png";
-				wtemp -> work_lock = new std::mutex;
+				//wtemp -> work_lock = new std::mutex;
 				wtemp -> deps = new std::queue<uint64_t>;
 				wtemp -> type = extract_image;
-				wtemp -> done = false;
+				wtemp -> status = 0;
 				work -> push_back(wtemp);
 			}
 			if (!upscale_img && !video)
@@ -294,10 +307,10 @@ void make_work(std::vector<work_unit_t *> *work, DIR *dir, const char *base_path
 				upscale_img_id = wtemp -> id;
 				wtemp -> working_dir = new std::string(original_image_dir);
 				wtemp -> command = new std::string("for f in *; do waifu2x -i $f -o ../upscaled/$f; done");
-				wtemp -> work_lock = new std::mutex;
+				//wtemp -> work_lock = new std::mutex;
 				wtemp -> deps = new std::queue<uint64_t>;
 				wtemp -> type = upscale_image;
-				wtemp -> done = false;
+				wtemp -> status = 0;
 				if (!orig_img)
 				{
 					wtemp -> deps -> push(orig_img_id);
@@ -313,10 +326,10 @@ void make_work(std::vector<work_unit_t *> *work, DIR *dir, const char *base_path
 				wtemp -> command = new std::string("ffmpeg -i \"../");
 				*(wtemp -> command) += *fitr;
 				*(wtemp -> command) += "\" -vn -acodec copy audio.ext";
-				wtemp -> work_lock = new std::mutex;
+				//wtemp -> work_lock = new std::mutex;
 				wtemp -> deps = new std::queue<uint64_t>;
 				wtemp -> type = extract_audio;
-				wtemp -> done = false;
+				wtemp -> status = 0;
 				work -> push_back(wtemp);
 			}
 			if (!video)
@@ -327,10 +340,10 @@ void make_work(std::vector<work_unit_t *> *work, DIR *dir, const char *base_path
 				wtemp -> command = new std::string("ffmpeg -framerate 30 -i ../images/upscaled/%05d.png -i ../audio.ext -c:v libx264 -c:a aac -strict experimental -b:a 192k -shortest -pix_fmt yuv420p \"");
 				*(wtemp -> command) += *fitr;
 				*(wtemp -> command) += "\"";
-				wtemp -> work_lock = new std::mutex;
+				//wtemp -> work_lock = new std::mutex;
 				wtemp -> deps = new std::queue<uint64_t>;
 				wtemp -> type = render_video;
-				wtemp -> done = false;
+				wtemp -> status = 0;
 				if (!orig_img)
 				{
 					wtemp -> deps -> push(orig_img_id);
@@ -362,11 +375,92 @@ void make_work(std::vector<work_unit_t *> *work, DIR *dir, const char *base_path
 	//if (dp) { delete dp; }
 }
 
-void do_work(std::vector<work_unit_t *> *work, std::mutex *vector_lock)
+void execute_unit(work_unit_t *unit)
 {
-	for (auto itr = work -> begin(); itr != work -> end(); itr++)
+	//std::cout << unit -> id << std::endl;
+	//std::cout << *(unit -> working_dir) << std::endl;
+	
+}
+
+void *work_thread(void *data)
+{
+	thread_data_t *thread_data = (thread_data_t *) data;
+	work_unit_t *unit;
+	bool done = false;
+	do
 	{
-		std::cout << *((*itr) -> command) << std::endl;
+		done = true;
+		unit = NULL;
+		thread_data -> vector_lock -> lock();
+		for (auto itr = thread_data -> work -> begin(); itr != thread_data -> work -> end(); itr++)
+		{
+			//(*itr) -> work_lock -> lock();
+			if ((*itr) -> status == 0 && (*itr) -> deps -> empty())
+			{
+				//std::cout << "ID " << (*itr) -> id << " has no deps. Starting." << std::endl;
+				unit = *itr;
+			}
+			else if ((*itr) -> status == 0 && !((*itr) -> deps -> empty()))
+			{
+				do
+				{
+					//thread_data -> work -> at((*itr) -> deps -> front()) -> work_lock -> lock();
+					if (thread_data -> work -> at((*itr) -> deps -> front()) -> status == 2)
+					{
+						//thread_data -> work -> at((*itr) -> deps -> front()) -> work_lock -> unlock();
+						(*itr) -> deps -> pop();
+					}
+					else
+					{
+						//thread_data -> work -> at((*itr) -> deps -> front()) -> work_lock -> unlock();
+						break;
+					}
+				} while (!((*itr) -> deps -> empty()));
+				if ((*itr) -> deps -> empty())
+				{
+					//std::cout << "ID " << (*itr) -> id << " has deps but they're done. Starting." << std::endl;
+					unit = *itr;
+				}
+				/*else
+				{
+					std::cout << "ID " << (*itr) -> id << " has unfinished deps." << std::endl;
+				}*/
+			}
+			if (unit) { break; }
+			//(*itr) -> work_lock -> unlock();
+		}
+		if (unit)
+		{
+			//unit -> work_lock -> lock();
+			unit -> status = 1;
+			//unit -> work_lock -> unlock();
+		}
+		if (unit)
+		{
+			done = false;
+			execute_unit(unit);
+			//unit -> work_lock -> lock();
+			unit -> status = 2;
+			//unit -> work_lock -> unlock();
+		}
+		thread_data -> vector_lock -> unlock();
+	} while(!done);
+	return NULL;
+}
+
+void do_work(std::vector<work_unit_t *> *work, std::mutex *vector_lock, size_t nthreads)
+{
+	pthread_t *threads = new pthread_t[nthreads];
+	thread_data_t *thread_data = new thread_data_t[nthreads];
+	for (unsigned int i = 0; i < nthreads; i++)
+	{
+		thread_data[i].work = work;
+		thread_data[i].vector_lock = vector_lock;
+		create_thread(&threads[i], NULL, work_thread, (void *) &thread_data[i]);
+	}
+	for (unsigned int i = 0; i < nthreads; i++)
+	{
+		pthread_join(threads[i], NULL);
 	}
 }
 
@@ -376,6 +470,7 @@ int main(int argc, char** argv)
 	std::mutex vector_lock;
 	size_t buf_size = 1024;
 	char* buf = new char[buf_size];
+	unsigned int threads = 1;
 	if (argc > 1)
 	{
 		strcpy(buf, argv[1]);
@@ -385,9 +480,14 @@ int main(int argc, char** argv)
 		std::cerr << std::strerror(errno) << std::endl;
 		return errno;
 	}
+	if (argc > 2)
+	{
+		threads = atoi(argv[2]);
+	}
 	DIR *dir = opendir(buf);
 	make_work(&work, dir, buf);
-	do_work(&work, &vector_lock);
+	std::cout << "Work size: " << work.size() << std::endl;
+	do_work(&work, &vector_lock, threads);
 	delete[] buf;
 	return 0;
 }
