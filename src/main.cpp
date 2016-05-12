@@ -23,10 +23,10 @@ typedef enum
 typedef struct
 {
 	uint64_t id;
-	std::string working_dir;
-	std::string command;
-	std::mutex work_lock;
-	std::queue<uint64_t> deps;
+	std::string *working_dir;
+	std::string *command;
+	std::mutex *work_lock;
+	std::queue<uint64_t> *deps;
 	work_t type;
 	bool done;
 } work_unit_t;
@@ -49,6 +49,24 @@ bool valid(const std::string &file)
 		if (file.size() >= itr -> size() && file.compare(file.size() - itr -> size(), itr -> size(), *itr) == 0) { return true; }
 	}
 	return false;
+}
+
+bool valid(const char *file)
+{
+	std::string temp = std::string(file);
+	return valid(temp);
+}
+
+bool isext(const char *file, const char *ext)
+{
+	size_t file_len = strlen(file);
+	size_t ext_len = strlen(ext);
+	if (file_len < ext_len) { return false; }
+	if (strcmp((const char *) file + file_len - ext_len, ext))
+	{
+		return false;
+	}
+	return true;
 }
 
 bool dir_exists(const char *path)
@@ -111,10 +129,18 @@ void make_work(std::vector<work_unit_t *> *work, DIR *dir, const char *base_path
 	std::string dtemp;
 	std::string ftemp;
 	std::string ptemp;
-	std::string data_dir; 
+	std::string data_dir;
 	std::string original_image_dir;
 	std::string upscaled_image_dir;
 	std::string output_dir;
+	bool orig_img;
+	bool upscale_img;
+	bool video;
+	bool audio;
+	work_unit_t *wtemp;
+	uint64_t orig_img_id;
+	uint64_t audio_id;
+	uint64_t upscale_img_id;
 	DIR *dptemp;
 	while (dir)
 	{
@@ -163,13 +189,161 @@ void make_work(std::vector<work_unit_t *> *work, DIR *dir, const char *base_path
 			upscaled_image_dir += "/images/upscaled";
 			output_dir = data_dir;
 			output_dir += "/out";
+			orig_img = false;
+			upscale_img = false;
+			video = false;
+			audio = false;
 			//check for existing extracted images
 			dptemp = opendir(original_image_dir.c_str());
 			while (dptemp)
 			{
 				dp = readdir(dptemp);
+				if (dp != NULL)
+				{
+					if (isext(dp -> d_name, "png"))
+					{
+						orig_img = true;
+						closedir(dptemp);
+						break;
+					}
+				}
+				else
+				{
+					closedir(dptemp);
+					break;
+				}
 			}
-			
+			//check for any upscaled images
+			dptemp = opendir(upscaled_image_dir.c_str());
+			while (dptemp)
+			{
+				dp = readdir(dptemp);
+				if (dp != NULL)
+				{
+					if (isext(dp -> d_name, "png"))
+					{
+						upscale_img = true;
+						closedir(dptemp);
+						break;
+					}
+				}
+				else
+				{
+					closedir(dptemp);
+					break;
+				}
+			}
+			//check for video
+			dptemp = opendir(output_dir.c_str());
+			while (dptemp)
+			{
+				dp = readdir(dptemp);
+				if (dp != NULL)
+				{
+					if (valid(dp -> d_name))
+					{
+						video = true;
+						closedir(dptemp);
+						break;
+					}
+				}
+				else
+				{
+					closedir(dptemp);
+					break;
+				}
+			}
+			dptemp = opendir(data_dir.c_str());
+			while (dptemp)
+			{
+				dp = readdir(dptemp);
+				if (dp != NULL)
+				{
+					if (strcmp("audio", dp -> d_name) == 0)
+					{
+						audio = true;
+						closedir(dptemp);
+						break;
+					}
+				}
+				else
+				{
+					closedir(dptemp);
+					break;
+				}
+			}
+			if (!orig_img && !video)
+			{
+				wtemp = new work_unit_t;
+				wtemp -> id = work -> size();
+				orig_img_id = wtemp -> id;
+				wtemp -> working_dir = new std::string(original_image_dir);
+				wtemp -> command = new std::string("ffmpeg -i ../../");
+				*(wtemp -> command) += *fitr;
+				*(wtemp -> command) += " %05d.png";
+				wtemp -> work_lock = new std::mutex;
+				wtemp -> deps = new std::queue<uint64_t>;
+				wtemp -> type = extract_image;
+				wtemp -> done = false;
+				work -> push_back(wtemp);
+			}
+			if (!upscale_img && !video)
+			{
+				wtemp = new work_unit_t;
+				wtemp -> id = work -> size();
+				upscale_img_id = wtemp -> id;
+				wtemp -> working_dir = new std::string(original_image_dir);
+				wtemp -> command = new std::string("for f in *; do waifu2x -i $f -o ../upscaled/$f; done");
+				wtemp -> work_lock = new std::mutex;
+				wtemp -> deps = new std::queue<uint64_t>;
+				wtemp -> type = upscale_image;
+				wtemp -> done = false;
+				if (!orig_img)
+				{
+					wtemp -> deps -> push(orig_img_id);
+				}
+				work -> push_back(wtemp);
+			}
+			if (!audio && !video)
+			{
+				wtemp = new work_unit_t;
+				wtemp -> id = work -> size();
+				audio_id = wtemp -> id;
+				wtemp -> working_dir = new std::string(data_dir);
+				wtemp -> command = new std::string("ffmpeg -i ../");
+				*(wtemp -> command) += *fitr;
+				*(wtemp -> command) += " -vn -acodec copy audio.ext";
+				wtemp -> work_lock = new std::mutex;
+				wtemp -> deps = new std::queue<uint64_t>;
+				wtemp -> type = extract_audio;
+				wtemp -> done = false;
+				work -> push_back(wtemp);
+			}
+			if (!video)
+			{
+				wtemp = new work_unit_t;
+				wtemp -> id = work -> size();
+				wtemp -> working_dir = new std::string(output_dir);
+				wtemp -> command = new std::string("ffmpeg -framerate 30 -i ../images/upscaled/%05d.png -i ../audio.ext -c:v libx264 -c:a aac -strict experimental -b:a 192k -shortest -pix_fmt yuv420p");
+				*(wtemp -> command) += *fitr;
+				wtemp -> work_lock = new std::mutex;
+				wtemp -> deps = new std::queue<uint64_t>;
+				wtemp -> type = render_video;
+				wtemp -> done = false;
+				if (!orig_img)
+				{
+					wtemp -> deps -> push(orig_img_id);
+				}
+				if (!upscale_img)
+				{
+					wtemp -> deps -> push(upscale_img_id);
+				}
+				if (!audio)
+				{
+					wtemp -> deps -> push(audio_id);
+				}
+				work -> push_back(wtemp);
+			}
 		}
 	}
 	/* a miracle happens */
@@ -189,7 +363,10 @@ void make_work(std::vector<work_unit_t *> *work, DIR *dir, const char *base_path
 
 void do_work(std::vector<work_unit_t *> *work, std::mutex *vector_lock)
 {
-	
+	for (auto itr = work -> begin(); itr != work -> end(); itr++)
+	{
+		std::cout << (*itr) -> command;
+	}
 }
 
 int main(int argc, char** argv)
